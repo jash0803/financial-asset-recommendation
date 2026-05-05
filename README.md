@@ -1,179 +1,144 @@
-# Financial Asset Recommendation
+# FAR-Trans Asset Recommender
 
-## Overview
+A modular hybrid recommendation system for financial assets, built on the [FAR-Trans dataset](https://arxiv.org/abs/2407.17727) -- a real-world investment dataset from a large European financial institution containing stocks, bonds, and mutual funds.
 
-The asset recommender leverages a **hybrid recommendation pipeline** that integrates:
-- **Collaborative Filtering (CF):** Uses customers' past buy transactions.
-- **Content-Based Filtering (CB):** Uses asset features and profitability data.
-- **Demographic Based Scoring:** Incorporates customer risk profiles and demographics.
+Created by [Jash Shah](https://www.linkedin.com/in/jashshah0803/).
 
-A **Streamlit** frontend is provided to allow user interaction and parameter tuning.
+## Quick Start
 
----
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-## Dataset Source
+## Architecture
 
-This system is built upon the **FAR-Trans dataset**, a comprehensive financial asset recommendation dataset, provided by a European financial institution.
+```
+financial-asset-recommendation/
+├── app.py                       # Streamlit UI entry point
+├── config.py                    # Pydantic configuration models
+├── requirements.txt
+├── data/
+│   ├── __init__.py
+│   ├── loader.py                # CSV loading, ISIN deduplication, DataBundle
+│   └── preprocessing.py         # Buy filtering, rating matrix, price momentum
+├── recommenders/
+│   ├── __init__.py
+│   ├── base.py                  # Abstract BaseRecommender interface
+│   ├── collaborative.py         # SVD matrix factorisation
+│   ├── content_based.py         # Asset feature similarity + momentum signals
+│   ├── demographic.py           # Customer profile → asset category alignment
+│   ├── popularity.py            # Global purchase frequency baseline
+│   ├── knn.py                   # Item-item KNN collaborative filtering
+│   └── hybrid.py                # Weighted combiner with dynamic weight updates
+├── evaluation/
+│   ├── __init__.py
+│   ├── ranking.py               # Precision, Recall, MAP, MRR, Hit Rate, nDCG @K
+│   ├── business.py              # ROI, Coverage, Diversity, Novelty @K
+│   └── splitters.py             # Leave-one-out and temporal train/test splits
+├── cache/
+│   ├── __init__.py
+│   └── manager.py               # Joblib disk cache with TTL invalidation
+├── questionnaire/
+│   ├── __init__.py
+│   ├── questions.py             # Parser for the MiFID questionnaire file
+│   └── processor.py             # Risk level and investment capacity scoring
+└── FAR-Trans-Data/              # Dataset files (not committed)
+```
 
-**Citation:**
+## Features
 
-> Sanz-Cruzado, J., Droukas, N., & McCreadie, R. (2024).  
-> **FAR-Trans: An Investment Dataset for Financial Asset Recommendation.**  
-> *IJCAI-2024 Workshop on Recommender Systems in Finance (Fin-RecSys)*, Jeju, South Korea.  
-> [arXiv:2407.08692](https://arxiv.org/abs/2407.08692)
+### Existing Users
+- Select a customer ID from the dropdown and generate personalised recommendations.
+- Adjust component weights via sidebar sliders (auto-normalised to sum to 1).
+- View enriched recommendation tables with asset metadata, market info, profitability, and 30d/90d price momentum.
+- Opt-in evaluation metrics computed on a sampled test set.
 
-**License:** CC-BY 4.0  
-**Link:** [https://creativecommons.org/licenses/by/4.0/](https://creativecommons.org/licenses/by/4.0/)
+### New Users (Cold Start)
+- Toggle "I'm a new user" in the sidebar to enter onboarding mode.
+- Complete the full 25-question MiFID risk assessment questionnaire.
+- History-dependent recommenders (CF, Content-Based, KNN) are automatically disabled.
+- Recommendations are generated using Popularity and Demographic algorithms.
 
-The dataset includes:
-- Customer demographics and investment profiles
-- Detailed financial product metadata
-- Historical transaction logs
-- Time-series pricing and profitability data
-- MiFID-aligned structure for risk profiling
+### Dataset Explorer
+- View summary statistics (asset count, customers, transactions, markets).
+- Interactive charts for asset categories and transaction channels.
+- Browseable markets table.
 
----
+## Dataset
 
-## Data Sources
+The FAR-Trans dataset includes:
 
-1. **Customer Information**
-   - File: `customer_information.csv`
-   - Details: Contains customer identifiers, type, risk level, investment capacity, and timestamps.
+| File | Records | Description |
+|------|---------|-------------|
+| `asset_information.csv` | ~836 | Stocks, bonds, mutual funds with category, sector, and market |
+| `customer_information.csv` | ~32K | Customer profiles with risk level and investment capacity |
+| `transactions.csv` | ~388K | Buy/sell transactions with value, units, and channel |
+| `close_prices.csv` | ~560K | Daily close prices for all assets |
+| `limit_prices.csv` | ~807 | ROI and price range per asset |
+| `markets.csv` | ~38 | Market metadata (country, trading hours) |
+| `questionnaires.csv` | 25 Qs | MiFID risk assessment questionnaire |
 
-2. **Asset Information**
-   - File: `asset_information.csv`
-   - Details: Contains ISIN, asset name, asset categories/subcategories, market identifier, sector, industry, and update timestamps.
+## Recommendation Algorithms
 
-3. **Transactions**
-   - File: `transactions.csv`
-   - Details: Contains customer transactions (Buy/Sell) with monetary values, units, channels, and market information.
-   - Note: Preprocessed to use only "Buy" transactions as positive interaction signals.
+| # | Algorithm | Description | Cold-Start |
+|---|-----------|-------------|:----------:|
+| 1 | **Collaborative Filtering** | TruncatedSVD on the user-item interaction matrix (implicit buy counts) | No |
+| 2 | **Content-Based** | Cosine similarity between user profile and asset features (category, sector, profitability, 30d/90d price momentum) | No |
+| 3 | **Demographic** | Matches user risk/capacity profile against the average demographics of buyers in each asset category | Yes |
+| 4 | **Popularity** | Global purchase frequency; non-personalised baseline | Yes |
+| 5 | **KNN (Item-Item)** | Item-item cosine similarity on the rating matrix | No |
 
-4. **Limit Prices**
-   - File: `limit_prices.csv`
-   - Details: Contains profitability data (ROI), first/last dates, and extreme values for every asset.
+The **Hybrid** combiner normalises each algorithm's scores to [0, 1] and blends them with configurable weights that are auto-normalised to sum to 1.0. For new users, only cold-start-capable algorithms are active.
 
----
+## Evaluation Metrics
 
-## System Components
+Evaluation is opt-in (click "Run Evaluation" after generating recommendations). Metrics are computed via leave-one-out splitting on a random sample of 500 test users for fast turnaround. Progress is logged to the terminal every 100 users.
 
-### 1. Data Loading & Preprocessing
+### Ranking Metrics
+| Metric | Description |
+|--------|-------------|
+| RMSE | Root mean squared error on held-out test interactions |
+| Precision@K | Fraction of top-K that are relevant |
+| Recall@K | Fraction of relevant items found in top-K |
+| MAP@K | Mean Average Precision -- rewards relevant items appearing earlier |
+| MRR@K | Mean Reciprocal Rank -- 1/rank of the first relevant item |
+| Hit Rate@K | Fraction of users with at least one hit in top-K |
+| nDCG@K | Normalised Discounted Cumulative Gain |
 
-- **CSV Loading:**  
-  Load all dataset files assuming CSV formatting and UTF-8 encoding.
+### Business Metrics
+| Metric | Description |
+|--------|-------------|
+| ROI@K | Average profitability of recommended assets |
+| Coverage@K | Fraction of the catalogue appearing in any user's recommendations |
+| Diversity@K | Average pairwise cosine distance among recommended items |
+| Novelty@K | Average self-information (less popular = more novel) |
 
-- **Preprocessing Transactions:**  
-  - Filter to include only "Buy" transactions.
-  - Sort by timestamp for proper train-test splitting.
-  - Build a customer × asset rating matrix using transaction counts.
+## Configuration
 
-- **Train-Test Split:**  
-  - Use leave-one-out split for evaluation.
-  - For each user, hold out their last transaction as test data.
+All settings are in `config.py` via Pydantic models:
 
----
+```python
+from config import AppConfig
 
-### 2. Recommendation Pipeline
+cfg = AppConfig()
+cfg.model.svd_components    # 5         — SVD latent factors
+cfg.model.knn_neighbors     # 20        — K for item-item KNN
+cfg.model.default_weights   # [0.25, 0.25, 0.2, 0.15, 0.15]
+cfg.data.data_dir           # FAR-Trans-Data/
+cfg.cache.ttl_seconds       # 3600      — disk cache TTL
+cfg.top_n                   # 10        — default recommendation count
+```
 
-#### A. Collaborative Filtering
-- **Matrix Factorization:**  
-  - Use Truncated SVD with 5 components.
-  - Compute latent factors for users and assets.
-  - _Output:_ Predicted ratings for customer-asset pairs.
+## Caching Strategy
 
-#### B. Content-Based Filtering
-- **Asset Profile Building:**  
-  - One-hot encode categorical features (category, subcategory, sector, industry, market).
-  - Include profitability as a numerical feature.
-  - Handle missing values with appropriate defaults.
-  - _Output:_ Feature matrix for all assets.
+| Layer | Mechanism | Scope |
+|-------|-----------|-------|
+| Streamlit in-memory | `@st.cache_data` / `@st.cache_resource` | Data loading, model fitting, evaluation results |
+| Disk persistence | `CacheManager` (joblib + TTL) | Fitted models that survive app restarts |
 
-- **User Profile & Scoring:**  
-  - Build user profile as mean of their purchased assets' features.
-  - Compute cosine similarity between user profile and all assets.
-  - Handle cold-start with neutral scores.
-  - _Output:_ Content-based similarity scores.
+## Citation
 
-#### C. Demographic Based Scoring
-- **Risk Profile Matching:**  
-  - Map customer risk levels and investment capacity to numeric scores.
-  - Compute weighted similarity between user demographics and asset categories.
-  - _Output:_ Demographic scores for assets.
-
-#### D. Hybrid Scoring
-- **Component Weights:**  
-  - Allow dynamic adjustment of weights for each component.
-  - Weights can be set independently (no sum constraint).
-  - Default weights: CF (0.4), CB (0.3), Demographic (0.3).
-
-- **Score Combination:**  
-  - Normalize each component's scores to [0,1] range.
-  - Apply weighted combination.
-  - _Output:_ Final composite scores.
-
-#### E. Recommendation Generation
-- **Filtering and Ranking:**  
-  - Remove previously purchased assets.
-  - Rank remaining assets by composite score.
-  - Select Top-N recommendations.
-
----
-
-### 3. Evaluation & Frontend
-
-#### A. Evaluation Metrics
-- **RMSE:**  
-  - Compute on held-out test transactions.
-  - Handle edge cases and insufficient data.
-
-- **Precision@N & Recall@N:**  
-  - Evaluate recommendation quality at specified N.
-  - Robust handling of edge cases and errors.
-
-#### B. Streamlit Frontend
-- **User Interface:**  
-  - Customer selection dropdown.
-  - Component weight sliders.
-  - Top-N parameter setting.
-  - Evaluation metrics toggle.
-
-- **Risk Assessment:**  
-  - Interactive questionnaire for risk profiling.
-  - Questions on risk appetite, investment expectations.
-  - Automatic profile updates.
-
-- **Recommendation Display:**  
-  - Detailed asset information.
-  - Formatted scores and metrics.
-  - Profitability and price information.
-
----
-
-## Data Flow Diagram
-
-```mermaid
-graph LR
-    A[Customer Information]
-    B[Asset Information]
-    C[Transactions]
-    D[Limit Prices]
-    
-    A -->|Preprocessing| F(Customer Profile)
-    B -->|Feature Encoding| G(Asset Features)
-    C -->|Filter & Aggregate| H(Rating Matrix)
-    D -->|Merge with B| G
-    
-    H -->|SVD| J(CF Scores)
-    G -->|Cosine Similarity| K(CB Scores)
-    F -->|Risk Matching| L(Demographic Scores)
-    
-    J --> M[Score Normalization]
-    K --> M
-    L --> M
-    
-    M -->|Weighted Combination| N(Final Scores)
-    N -->|Rank & Filter| O(Top-N Recommendations)
-    
-    O --> P[Streamlit UI]
-    P -->|Questionnaire| Q[Risk Assessment]
-    Q -->|Update| F
+> Javier Sanz-Cruzado, Nikolaos Droukas, Richard McCreadie. *FAR-Trans: An Investment Dataset for Financial Asset Recommendation.* IJCAI-2024 Workshop on Recommender Systems in Finance (Fin-RecSys). Jeju, South Korea, August 2024.
