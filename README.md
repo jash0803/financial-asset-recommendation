@@ -45,7 +45,7 @@ financial-asset-recommendation/
 │   ├── __init__.py
 │   ├── questions.py             # Parser for the MiFID questionnaire file
 │   └── processor.py             # Risk level and investment capacity scoring
-└── FAR-Trans-Data/              # Dataset files (not committed)
+└── FAR-Trans-Data/              # Dataset files
 ```
 
 ## Features
